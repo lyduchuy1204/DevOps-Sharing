@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies (monorepo)
+        run: npm install
+
+      - name: Build frontend (static export)
+        run: npm -w frontend run build
+
+      - name: Build backend (syntax check)
+        run: npm -w backend run build
+
+      - name: Docker build backend image
+        run: docker build -f backend/Dockerfile -t devopsintern-backend:ci .
+
+      - name: Run backend container + healthcheck
+        run: |
+          docker run -d -p 3001:3001 --name devopsintern-backend devopsintern-backend:ci
+          sleep 2
+          curl -fsS http://localhost:3001/health
+          docker rm -f devopsintern-backend
+

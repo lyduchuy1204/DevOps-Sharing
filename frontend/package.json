@@ -1,0 +1,21 @@
+{
+  "name": "@repo/frontend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "serve": "serve out -l 3000"
+  },
+  "dependencies": {
+    "@repo/shared": "file:../shared",
+    "next": "^14.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "serve": "^14.2.0"
+  }
+}
+
