@@ -1,0 +1,79 @@
+name: GitFlow CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - "feature/**"
+      - "release/**"
+      - "hotfix/**"
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: devops-sharing-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build (Docker images)
+    runs-on: [self-hosted, Cloudflare, Windows]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker build (via Compose)
+        run: |
+          docker compose build
+          docker images | Select-String -Pattern "devopsintern-(frontend|backend)"
+
+  deploy:
+    name: Deploy (Docker Compose on Cloudflare runner)
+    needs: build
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/hotfix/') || github.event_name == 'workflow_dispatch' }}
+    runs-on: [self-hosted, Cloudflare, Windows]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy with Docker Compose
+        run: |
+          docker compose up -d
+          docker compose ps
+
+      - name: Test after deploy (curl API)
+        env:
+          FRONTEND_PORT: ${{ env.FRONTEND_PORT }}
+          BACKEND_PORT: ${{ env.BACKEND_PORT }}
+        run: |
+          $frontendPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "8080" }
+          $backendPort = if ($env:BACKEND_PORT) { $env:BACKEND_PORT } else { "3001" }
+
+          $healthOk = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            try {
+              $health = curl.exe -fsS "http://localhost:$backendPort/health"
+              if ($health -match '"ok"' -or $health -match '"status"\s*:\s*"ok"') {
+                $healthOk = $true
+                break
+              }
+            } catch {}
+            Start-Sleep -Seconds 2
+          }
+          if (-not $healthOk) { throw "Backend healthcheck failed on port $backendPort" }
+
+          curl.exe -fsS "http://localhost:$backendPort/api/hello?name=CloudflareRunner" | Out-Null
+          curl.exe -fsS "http://localhost:$backendPort/api/info" | Out-Null
+
+          $status = (Invoke-WebRequest "http://localhost:$frontendPort/").StatusCode
+          if ($status -ne 200) { throw "Frontend returned HTTP $status on port $frontendPort" }
