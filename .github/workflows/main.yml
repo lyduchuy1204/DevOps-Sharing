@@ -35,8 +35,9 @@ jobs:
       - name: Docker build (via Compose)
         run: |
           docker compose build
-          docker compose images
-          if ($LASTEXITCODE -ne 0) { Write-Host "docker compose images failed (ignored)" }
+          # `docker compose images` may fail on some Windows/BuildKit setups with "No such image: sha256:...".
+          # Use `docker image ls` for a stable listing instead.
+          docker image ls --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}"
 
   deploy:
     name: Deploy (Docker Compose on Cloudflare runner)
