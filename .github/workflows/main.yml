@@ -58,16 +58,13 @@ jobs:
 
       - name: Test after deploy (curl inside compose network)
         run: |
-          $net = "${env:COMPOSE_PROJECT_NAME}_default"
-          $curlImage = "curlimages/curl:8.5.0"
+          $backendCid = docker compose ps -q backend
+          if (-not $backendCid) { docker compose ps; throw "Cannot find backend container id" }
 
-          docker network inspect $net *> $null
-          if ($LASTEXITCODE -ne 0) { throw "Missing docker network: $net" }
-
-          Write-Host "Waiting for backend /health on network $net..."
+          Write-Host "Waiting for backend /health..."
           $ok = $false
           for ($i = 1; $i -le 30; $i++) {
-            docker run --rm --network $net $curlImage -fsS http://backend:3001/health *> $null
+            docker exec $backendCid node -e "(async()=>{const r=await fetch('http://localhost:3001/health'); if(!r.ok) process.exit(1); const t=await r.text(); if(!t.includes('ok')) process.exit(1);})().catch(e=>{console.error(e);process.exit(1);});" *> $null
             if ($LASTEXITCODE -eq 0) { $ok = $true; break }
             Start-Sleep -Seconds 2
           }
@@ -78,11 +75,11 @@ jobs:
             throw "Backend healthcheck failed"
           }
 
-          docker run --rm --network $net $curlImage -fsS "http://backend:3001/api/hello?name=CloudflareRunner" *> $null
+          docker exec $backendCid node -e "(async()=>{const r=await fetch('http://localhost:3001/api/hello?name=CloudflareRunner'); if(!r.ok) process.exit(1);})().catch(e=>{console.error(e);process.exit(1);});" *> $null
           if ($LASTEXITCODE -ne 0) { throw "GET /api/hello failed" }
 
-          docker run --rm --network $net $curlImage -fsS "http://backend:3001/api/info" *> $null
+          docker exec $backendCid node -e "(async()=>{const r=await fetch('http://localhost:3001/api/info'); if(!r.ok) process.exit(1);})().catch(e=>{console.error(e);process.exit(1);});" *> $null
           if ($LASTEXITCODE -ne 0) { throw "GET /api/info failed" }
 
-          docker run --rm --network $net $curlImage -fsS "http://frontend/" *> $null
+          docker exec $backendCid node -e "(async()=>{const r=await fetch('http://frontend/'); if(!r.ok) process.exit(1);})().catch(e=>{console.error(e);process.exit(1);});" *> $null
           if ($LASTEXITCODE -ne 0) { throw "GET frontend / failed" }
