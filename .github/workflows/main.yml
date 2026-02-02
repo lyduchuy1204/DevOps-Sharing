@@ -24,7 +24,10 @@ env:
 jobs:
   build:
     name: Build (Docker images)
-    runs-on: [self-hosted, Cloudflare]
+    runs-on: [self-hosted, Cloudflare, Windows]
+    defaults:
+      run:
+        shell: powershell
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,13 +35,17 @@ jobs:
       - name: Docker build (via Compose)
         run: |
           docker compose build
-          docker compose images || true
+          docker compose images
+          if ($LASTEXITCODE -ne 0) { Write-Host "docker compose images failed (ignored)" }
 
   deploy:
     name: Deploy (Docker Compose on Cloudflare runner)
     needs: build
     if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/hotfix/') || github.event_name == 'workflow_dispatch' }}
-    runs-on: [self-hosted, Cloudflare]
+    runs-on: [self-hosted, Cloudflare, Windows]
+    defaults:
+      run:
+        shell: powershell
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,28 +57,31 @@ jobs:
 
       - name: Test after deploy (curl inside compose network)
         run: |
-          set -e
-          NET="${COMPOSE_PROJECT_NAME}_default"
-          CURL_IMAGE="curlimages/curl:8.5.0"
+          $net = "${env:COMPOSE_PROJECT_NAME}_default"
+          $curlImage = "curlimages/curl:8.5.0"
 
-          docker network inspect "$NET" >/dev/null 2>&1 || (echo "Missing docker network: $NET" && exit 1)
+          docker network inspect $net *> $null
+          if ($LASTEXITCODE -ne 0) { throw "Missing docker network: $net" }
 
-          echo "Waiting for backend /health on network $NET..."
-          ok=0
-          for i in $(seq 1 30); do
-            if docker run --rm --network "$NET" "$CURL_IMAGE" -fsS http://backend:3001/health >/dev/null; then
-              ok=1
-              break
-            fi
-            sleep 2
-          done
-          if [ "$ok" -ne 1 ]; then
-            echo "Backend healthcheck failed"
-            docker compose ps || true
-            docker compose logs --tail 200 backend || true
-            exit 1
-          fi
+          Write-Host "Waiting for backend /health on network $net..."
+          $ok = $false
+          for ($i = 1; $i -le 30; $i++) {
+            docker run --rm --network $net $curlImage -fsS http://backend:3001/health *> $null
+            if ($LASTEXITCODE -eq 0) { $ok = $true; break }
+            Start-Sleep -Seconds 2
+          }
 
-          docker run --rm --network "$NET" "$CURL_IMAGE" -fsS "http://backend:3001/api/hello?name=CloudflareRunner" >/dev/null
-          docker run --rm --network "$NET" "$CURL_IMAGE" -fsS "http://backend:3001/api/info" >/dev/null
-          docker run --rm --network "$NET" "$CURL_IMAGE" -fsS "http://frontend/" >/dev/null
+          if (-not $ok) {
+            docker compose ps
+            docker compose logs --tail 200 backend
+            throw "Backend healthcheck failed"
+          }
+
+          docker run --rm --network $net $curlImage -fsS "http://backend:3001/api/hello?name=CloudflareRunner" *> $null
+          if ($LASTEXITCODE -ne 0) { throw "GET /api/hello failed" }
+
+          docker run --rm --network $net $curlImage -fsS "http://backend:3001/api/info" *> $null
+          if ($LASTEXITCODE -ne 0) { throw "GET /api/info failed" }
+
+          docker run --rm --network $net $curlImage -fsS "http://frontend/" *> $null
+          if ($LASTEXITCODE -ne 0) { throw "GET frontend / failed" }
