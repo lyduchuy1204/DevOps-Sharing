@@ -81,5 +81,8 @@ jobs:
           docker exec $backendCid node -e "(async()=>{const r=await fetch('http://localhost:3001/api/info'); if(!r.ok) process.exit(1);})().catch(e=>{console.error(e);process.exit(1);});" *> $null
           if ($LASTEXITCODE -ne 0) { throw "GET /api/info failed" }
 
+          docker exec $backendCid node -e "(async()=>{const r=await fetch('http://localhost:3001/api/openapi.json'); if(!r.ok) process.exit(1); const j=await r.json(); if(!j.openapi) process.exit(1);})().catch(e=>{console.error(e);process.exit(1);});" *> $null
+          if ($LASTEXITCODE -ne 0) { throw "GET /api/openapi.json failed" }
+
           docker exec $backendCid node -e "(async()=>{const r=await fetch('http://frontend/'); if(!r.ok) process.exit(1);})().catch(e=>{console.error(e);process.exit(1);});" *> $null
           if ($LASTEXITCODE -ne 0) { throw "GET frontend / failed" }

@@ -17,6 +17,12 @@ Test:
 - `http://localhost:3001/health`
 - `http://localhost:3001/api/hello?name=DevOps`
 - `http://localhost:3001/api/info`
+- `http://localhost:3001/api/add?a=1&b=2`
+
+Swagger UI:
+
+- `http://localhost:3001/api/docs`
+- Spec JSON: `http://localhost:3001/api/openapi.json`
 
 POST JSON (ví dụ):
 
