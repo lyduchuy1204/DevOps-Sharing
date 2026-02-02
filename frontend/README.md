@@ -49,3 +49,8 @@ docker compose up -d --build
 ```
 
 Mở `http://localhost:8080` (hoặc đổi port: `FRONTEND_PORT=8081 docker compose up -d --build`).
+
+## Review API (Swagger)
+
+- Khi chạy bằng Docker Compose: mở `http://localhost:8080/api/docs`
+- Khi chạy backend riêng: mở `http://localhost:3001/api/docs`
