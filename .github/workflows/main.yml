@@ -18,13 +18,13 @@ concurrency:
   group: devops-sharing-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  COMPOSE_PROJECT_NAME: devops-sharing
+
 jobs:
   build:
     name: Build (Docker images)
-    runs-on: [self-hosted, Cloudflare, Windows]
-    defaults:
-      run:
-        shell: pwsh
+    runs-on: [self-hosted, Cloudflare]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,48 +32,46 @@ jobs:
       - name: Docker build (via Compose)
         run: |
           docker compose build
-          docker images | Select-String -Pattern "devopsintern-(frontend|backend)"
+          docker compose images || true
 
   deploy:
     name: Deploy (Docker Compose on Cloudflare runner)
     needs: build
     if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/hotfix/') || github.event_name == 'workflow_dispatch' }}
-    runs-on: [self-hosted, Cloudflare, Windows]
-    defaults:
-      run:
-        shell: pwsh
+    runs-on: [self-hosted, Cloudflare]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Deploy with Docker Compose
         run: |
-          docker compose up -d
+          docker compose up -d --build
           docker compose ps
 
-      - name: Test after deploy (curl API)
-        env:
-          FRONTEND_PORT: ${{ env.FRONTEND_PORT }}
-          BACKEND_PORT: ${{ env.BACKEND_PORT }}
+      - name: Test after deploy (curl inside compose network)
         run: |
-          $frontendPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "8080" }
-          $backendPort = if ($env:BACKEND_PORT) { $env:BACKEND_PORT } else { "3001" }
+          set -e
+          NET="${COMPOSE_PROJECT_NAME}_default"
+          CURL_IMAGE="curlimages/curl:8.5.0"
 
-          $healthOk = $false
-          for ($i = 0; $i -lt 30; $i++) {
-            try {
-              $health = curl.exe -fsS "http://localhost:$backendPort/health"
-              if ($health -match '"ok"' -or $health -match '"status"\s*:\s*"ok"') {
-                $healthOk = $true
-                break
-              }
-            } catch {}
-            Start-Sleep -Seconds 2
-          }
-          if (-not $healthOk) { throw "Backend healthcheck failed on port $backendPort" }
+          docker network inspect "$NET" >/dev/null 2>&1 || (echo "Missing docker network: $NET" && exit 1)
 
-          curl.exe -fsS "http://localhost:$backendPort/api/hello?name=CloudflareRunner" | Out-Null
-          curl.exe -fsS "http://localhost:$backendPort/api/info" | Out-Null
+          echo "Waiting for backend /health on network $NET..."
+          ok=0
+          for i in $(seq 1 30); do
+            if docker run --rm --network "$NET" "$CURL_IMAGE" -fsS http://backend:3001/health >/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "Backend healthcheck failed"
+            docker compose ps || true
+            docker compose logs --tail 200 backend || true
+            exit 1
+          fi
 
-          $status = (Invoke-WebRequest "http://localhost:$frontendPort/").StatusCode
-          if ($status -ne 200) { throw "Frontend returned HTTP $status on port $frontendPort" }
+          docker run --rm --network "$NET" "$CURL_IMAGE" -fsS "http://backend:3001/api/hello?name=CloudflareRunner" >/dev/null
+          docker run --rm --network "$NET" "$CURL_IMAGE" -fsS "http://backend:3001/api/info" >/dev/null
+          docker run --rm --network "$NET" "$CURL_IMAGE" -fsS "http://frontend/" >/dev/null
